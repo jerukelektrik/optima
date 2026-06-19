@@ -486,8 +486,13 @@ function vndc_optima_optimize_images_markup( $html ) {
                 }
             }
             
-            // Inject missing width & height attributes
-            if ( ! isset( $attrs['width'] ) || ! isset( $attrs['height'] ) ) {
+            // Inject missing width & height attributes (exclude logos to prevent responsive/mobile stretching)
+            $is_logo = ( strpos( strtolower( $src ), 'logo' ) !== false );
+            if ( ! $is_logo && isset( $attrs['class'] ) && strpos( strtolower( $attrs['class'] ), 'logo' ) !== false ) {
+                $is_logo = true;
+            }
+            
+            if ( ! $is_logo && ( ! isset( $attrs['width'] ) || ! isset( $attrs['height'] ) ) ) {
                 $dimensions = vndc_optima_get_local_image_dimensions( $src );
                 if ( $dimensions ) {
                     if ( ! isset( $attrs['width'] ) ) {
