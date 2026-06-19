@@ -1567,6 +1567,16 @@ function vndc_optima_seo_woocommerce_schema() {
     echo '<script type="application/ld+json">' . json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT ) . '</script>' . "\n";
 }
 
+// Disable default WordPress wp-sitemap.xml when SEO module is active
+add_filter( 'wp_sitemaps_enabled', 'vndc_optima_disable_wp_sitemaps' );
+function vndc_optima_disable_wp_sitemaps( $enabled ) {
+    $settings = vndc_optima_get_settings();
+    if ( ! empty( $settings['seo_module'] ) ) {
+        return false;
+    }
+    return $enabled;
+}
+
 // 5. Dynamic XML Sitemap Generator
 add_action( 'init', 'vndc_optima_sitemap_rewrite_rule' );
 function vndc_optima_sitemap_rewrite_rule() {
@@ -1581,6 +1591,16 @@ function vndc_optima_sitemap_query_vars( $vars ) {
 
 add_action( 'template_redirect', 'vndc_optima_sitemap_generator' );
 function vndc_optima_sitemap_generator() {
+    // Redirect default WordPress wp-sitemap.xml to sitemap.xml
+    $request_uri = $_SERVER['REQUEST_URI'];
+    if ( stripos( $request_uri, 'wp-sitemap.xml' ) !== false ) {
+        $settings = vndc_optima_get_settings();
+        if ( ! empty( $settings['seo_module'] ) ) {
+            wp_redirect( home_url( '/sitemap.xml' ), 301 );
+            exit;
+        }
+    }
+
     if ( get_query_var( 'vndc_sitemap' ) ) {
         $settings = vndc_optima_get_settings();
         if ( empty( $settings['seo_module'] ) ) {
