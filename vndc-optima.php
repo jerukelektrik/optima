@@ -1456,9 +1456,9 @@ function vndc_optima_seo_save_meta( $post_id ) {
 }
 
 // Add columns to post list table (for post, page, and WooCommerce product)
-add_filter( 'manage_post_posts_columns', 'vndc_optima_add_seo_columns' );
-add_filter( 'manage_page_pages_columns', 'vndc_optima_add_seo_columns' );
-add_filter( 'manage_product_posts_columns', 'vndc_optima_add_seo_columns' );
+add_filter( 'manage_posts_columns', 'vndc_optima_add_seo_columns' );
+add_filter( 'manage_pages_columns', 'vndc_optima_add_seo_columns' );
+add_filter( 'manage_edit-product_columns', 'vndc_optima_add_seo_columns' );
 
 function vndc_optima_add_seo_columns( $columns ) {
     $settings = vndc_optima_get_settings();
@@ -1470,9 +1470,8 @@ function vndc_optima_add_seo_columns( $columns ) {
 }
 
 // Populate columns with values
-add_action( 'manage_post_posts_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
-add_action( 'manage_page_pages_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
-add_action( 'manage_product_posts_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
+add_action( 'manage_posts_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
+add_action( 'manage_pages_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
 
 function vndc_optima_populate_seo_columns( $column_name, $post_id ) {
     $settings = vndc_optima_get_settings();
