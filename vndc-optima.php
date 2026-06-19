@@ -1426,13 +1426,24 @@ function vndc_optima_seo_meta_box_html( $post ) {
 
 add_action( 'save_post', 'vndc_optima_seo_save_meta' );
 function vndc_optima_seo_save_meta( $post_id ) {
-    if ( ! isset( $_POST['vndc_seo_meta_nonce'] ) || ! wp_verify_nonce( $_POST['vndc_seo_meta_nonce'], 'vndc_seo_save_meta' ) ) {
-        return;
-    }
     if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
         return;
     }
     if ( ! current_user_can( 'edit_post', $post_id ) ) {
+        return;
+    }
+    
+    $is_valid = false;
+    // Verification for standard Edit Post screen
+    if ( isset( $_POST['vndc_seo_meta_nonce'] ) && wp_verify_nonce( $_POST['vndc_seo_meta_nonce'], 'vndc_seo_save_meta' ) ) {
+        $is_valid = true;
+    }
+    // Verification for Quick Edit screen
+    if ( isset( $_POST['vndc_seo_quick_edit_nonce'] ) && wp_verify_nonce( $_POST['vndc_seo_quick_edit_nonce'], 'vndc_seo_quick_edit_save' ) ) {
+        $is_valid = true;
+    }
+    
+    if ( ! $is_valid ) {
         return;
     }
     
@@ -1442,6 +1453,121 @@ function vndc_optima_seo_save_meta( $post_id ) {
     if ( isset( $_POST['vndc_seo_desc'] ) ) {
         update_post_meta( $post_id, '_vndc_seo_desc', sanitize_textarea_field( $_POST['vndc_seo_desc'] ) );
     }
+}
+
+// Add columns to post list table (for post, page, and WooCommerce product)
+add_filter( 'manage_post_posts_columns', 'vndc_optima_add_seo_columns' );
+add_filter( 'manage_page_pages_columns', 'vndc_optima_add_seo_columns' );
+add_filter( 'manage_product_posts_columns', 'vndc_optima_add_seo_columns' );
+
+function vndc_optima_add_seo_columns( $columns ) {
+    $settings = vndc_optima_get_settings();
+    if ( ! empty( $settings['seo_module'] ) ) {
+        $columns['vndc_seo_title'] = 'SEO Title';
+        $columns['vndc_seo_desc'] = 'SEO Description';
+    }
+    return $columns;
+}
+
+// Populate columns with values
+add_action( 'manage_post_posts_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
+add_action( 'manage_page_pages_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
+add_action( 'manage_product_posts_custom_column', 'vndc_optima_populate_seo_columns', 10, 2 );
+
+function vndc_optima_populate_seo_columns( $column_name, $post_id ) {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    if ( $column_name === 'vndc_seo_title' ) {
+        $title = get_post_meta( $post_id, '_vndc_seo_title', true );
+        echo esc_html( $title ? $title : '—' );
+    } elseif ( $column_name === 'vndc_seo_desc' ) {
+        $desc = get_post_meta( $post_id, '_vndc_seo_desc', true );
+        $display_desc = $desc ? mb_strimwidth( $desc, 0, 50, '...' ) : '—';
+        echo '<span class="vndc-seo-desc-col" data-seo-desc="' . esc_attr( $desc ) . '">' . esc_html( $display_desc ) . '</span>';
+    }
+}
+
+// Add input fields to Quick Edit screen
+add_action( 'quick_edit_custom_box', 'vndc_optima_quick_edit_fields', 10, 2 );
+function vndc_optima_quick_edit_fields( $column_name, $post_type ) {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    if ( $column_name !== 'vndc_seo_title' ) {
+        return;
+    }
+    if ( ! in_array( $post_type, array( 'post', 'page', 'product' ) ) ) {
+        return;
+    }
+    
+    wp_nonce_field( 'vndc_seo_quick_edit_save', 'vndc_seo_quick_edit_nonce' );
+    ?>
+    <fieldset class="inline-edit-col-right" style="margin-top: 10px;">
+        <div class="inline-edit-col">
+            <h4 class="title" style="margin-bottom: 5px; font-weight: 600; color: #1d1b3a;">VNDC SEO Settings</h4>
+            <label>
+                <span class="title">SEO Title</span>
+                <span class="input-text-wrap">
+                    <input type="text" name="vndc_seo_title" class="vndc-seo-title-field" value="" placeholder="Leave blank to use default title..." />
+                </span>
+            </label>
+            <label style="margin-top: 8px;">
+                <span class="title">SEO Description</span>
+                <span class="input-text-wrap">
+                    <textarea name="vndc_seo_desc" class="vndc-seo-desc-field" rows="2" style="width: 100%; border: 1px solid #cbd5e0; border-radius: 4px; padding: 4px 8px; font-size: 13px;" placeholder="Leave blank to use default snippet..."></textarea>
+                </span>
+            </label>
+        </div>
+    </fieldset>
+    <?php
+}
+
+// JavaScript to populate Quick Edit fields when clicking "Quick Edit"
+add_action( 'admin_footer', 'vndc_optima_quick_edit_javascript' );
+function vndc_optima_quick_edit_javascript() {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    global $current_screen;
+    if ( ! $current_screen || ! in_array( $current_screen->post_type, array( 'post', 'page', 'product' ) ) ) {
+        return;
+    }
+    ?>
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        var $wp_inline_edit = inlineEditPost.edit;
+        inlineEditPost.edit = function(id) {
+            $wp_inline_edit.apply(this, arguments);
+            
+            var post_id = 0;
+            if (typeof(id) == 'object') {
+                post_id = parseInt(this.getId(id));
+            }
+            
+            if (post_id > 0) {
+                var $row = $('#post-' + post_id);
+                var seo_title = $row.find('.column-vndc_seo_title').text().trim();
+                var seo_desc = $row.find('.column-vndc_seo_desc .vndc-seo-desc-col').attr('data-seo-desc') || '';
+                
+                if (seo_title === '—') {
+                    seo_title = '';
+                }
+                
+                var $edit_row = $('#edit-' + post_id);
+                $edit_row.find('.vndc-seo-title-field').val(seo_title);
+                $edit_row.find('.vndc-seo-desc-field').val(seo_desc);
+            }
+        };
+    });
+    </script>
+    <?php
 }
 
 // 2. Custom Title Tag Filter
