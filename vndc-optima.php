@@ -7,6 +7,8 @@
  * Author: VNDC Digital Agency
  * Author URI: https://www.vndc.co.id
  * License: GPL2
+ * GitHub Plugin URI: jerukelektrik/optima
+ * Primary Branch: main
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
