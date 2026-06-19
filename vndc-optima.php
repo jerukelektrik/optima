@@ -834,6 +834,12 @@ function vndc_optima_clear_transients_on_activation() {
         global $wpdb;
         $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_vndc_%' OR option_name LIKE '_transient_timeout_vndc_%'" );
 
+        // Register sitemap rewrite rules and flush
+        if ( function_exists( 'vndc_optima_sitemap_rewrite_rule' ) ) {
+            vndc_optima_sitemap_rewrite_rule();
+        }
+        flush_rewrite_rules();
+
         // Pre-convert critical LCP image files to WebP instantly on activation to avoid page speed lag for the first crawler/visitor!
         $upload_dir = wp_upload_dir();
         if ( isset( $upload_dir['basedir'] ) ) {
@@ -926,4 +932,778 @@ function vndc_optima_deactivate_htaccess_optimizations() {
         $content = preg_replace( '/\n{3,}/', "\n\n", $content );
         @file_put_contents( $htaccess_path, $content, LOCK_EX );
     }
+
+    // Flush rewrite rules on deactivation to clean up sitemap.xml
+    flush_rewrite_rules();
 }
+
+/* ==========================================================================
+   9. SETTINGS & OPTIONS CONSOLE (VNDC BRANDED)
+   ========================================================================== */
+
+function vndc_optima_get_settings() {
+    $defaults = array(
+        'classic_editor'  => 1,
+        'post_duplicator' => 1,
+        'whatsapp_button' => 1,
+        'whatsapp_number' => '',
+        'whatsapp_message'=> 'Halo Setiawan Spooring, saya ingin bertanya tentang layanan Anda...',
+        'seo_module'      => 1,
+    );
+    $settings = get_option( 'vndc_optima_settings', $defaults );
+    return wp_parse_args( $settings, $defaults );
+}
+
+add_action( 'admin_menu', 'vndc_optima_add_admin_menu' );
+function vndc_optima_add_admin_menu() {
+    add_menu_page(
+        'VNDC Optima Settings',
+        'VNDC Optima',
+        'manage_options',
+        'vndc-optima',
+        'vndc_optima_settings_page_html',
+        'dashicons-performance',
+        90
+    );
+}
+
+function vndc_optima_settings_page_html() {
+    if ( ! current_user_can( 'manage_options' ) ) {
+        return;
+    }
+    
+    // Save Settings Action
+    if ( isset( $_POST['vndc_optima_save_settings'] ) ) {
+        check_admin_referer( 'vndc_optima_settings_save', 'vndc_optima_settings_nonce' );
+        
+        $settings = array(
+            'classic_editor'  => isset( $_POST['classic_editor'] ) ? 1 : 0,
+            'post_duplicator' => isset( $_POST['post_duplicator'] ) ? 1 : 0,
+            'whatsapp_button' => isset( $_POST['whatsapp_button'] ) ? 1 : 0,
+            'whatsapp_number' => sanitize_text_field( $_POST['whatsapp_number'] ),
+            'whatsapp_message'=> sanitize_textarea_field( $_POST['whatsapp_message'] ),
+            'seo_module'      => isset( $_POST['seo_module'] ) ? 1 : 0,
+        );
+        
+        update_option( 'vndc_optima_settings', $settings );
+        
+        // Re-register sitemap rewrite rules and flush
+        vndc_optima_sitemap_rewrite_rule();
+        flush_rewrite_rules();
+        
+        echo '<div class="notice notice-success is-dismissible"><p><strong>VNDC Optima:</strong> Settings saved and rewrite rules flushed successfully!</p></div>';
+    }
+    
+    // Purge Cache Action
+    if ( isset( $_POST['vndc_optima_purge_cache'] ) ) {
+        check_admin_referer( 'vndc_optima_cache_purge', 'vndc_optima_purge_nonce' );
+        global $wpdb;
+        $wpdb->query( "DELETE FROM {$wpdb->options} WHERE option_name LIKE '_transient_vndc_%' OR option_name LIKE '_transient_timeout_vndc_%'" );
+        echo '<div class="notice notice-success is-dismissible"><p><strong>VNDC Optima:</strong> Optimization cache & WebP conversion locks purged successfully!</p></div>';
+    }
+    
+    $settings = vndc_optima_get_settings();
+    
+    // Statistics for status widget
+    global $wpdb;
+    $cached_webp_count = $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->options} WHERE option_name LIKE '_transient_vndc_webp_%'" );
+    $gd_status = extension_loaded('gd') ? '<span style="color: #2ec4b6; font-weight: bold;">Active</span>' : '<span style="color: #e71d36; font-weight: bold;">Inactive</span>';
+    $imagick_status = extension_loaded('imagick') ? '<span style="color: #2ec4b6; font-weight: bold;">Active</span>' : '<span style="color: #e71d36; font-weight: bold;">Inactive</span>';
+    
+    ?>
+    <div class="wrap vndc-settings-wrap">
+        <style>
+            .vndc-settings-wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif; max-width: 1200px; margin-top: 20px; }
+            .vndc-header { background: linear-gradient(135deg, #1d1b3a 0%, #0d0c1d 100%); color: #fff; padding: 25px 30px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: space-between; }
+            .vndc-header h1 { color: #fff; margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+            .vndc-header p { margin: 5px 0 0 0; color: #a5a2d6; font-size: 14px; }
+            .vndc-brand { font-weight: bold; background: linear-gradient(to right, #00f2fe, #4facfe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+            
+            .vndc-layout { display: flex; gap: 20px; flex-wrap: wrap; }
+            .vndc-col-main { flex: 2; min-width: 320px; }
+            .vndc-col-sidebar { flex: 1; min-width: 300px; }
+            
+            .vndc-card { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; border-top: 4px solid #4facfe; }
+            .vndc-card.sidebar-card { border-top-color: #2ec4b6; }
+            .vndc-card h2 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 12px; color: #1d1b3a; font-size: 18px; font-weight: 600; }
+            
+            /* Toggle Switch */
+            .vndc-option-row { display: flex; align-items: flex-start; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid #f6f6f6; }
+            .vndc-option-row:last-child { border-bottom: none; }
+            .vndc-option-info { flex: 1; padding-right: 20px; }
+            .vndc-option-info label { font-weight: 600; color: #2d3748; font-size: 15px; display: block; margin-bottom: 4px; }
+            .vndc-option-info p { margin: 0; color: #718096; font-size: 13px; line-height: 1.4; }
+            
+            .vndc-switch { position: relative; display: inline-block; width: 48px; height: 24px; }
+            .vndc-switch input { opacity: 0; width: 0; height: 0; }
+            .vndc-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e0; transition: .3s; border-radius: 24px; }
+            .vndc-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 4px; bottom: 4px; background-color: white; transition: .3s; border-radius: 50%; }
+            input:checked + .vndc-slider { background-color: #4facfe; }
+            input:checked + .vndc-slider:before { transform: translateX(24px); }
+            
+            /* Inputs */
+            .vndc-sub-fields { background: #f7fafc; padding: 15px; border-radius: 6px; margin-top: 10px; border-left: 3px solid #cbd5e0; }
+            .vndc-field-group { margin-bottom: 12px; }
+            .vndc-field-group:last-child { margin-bottom: 0; }
+            .vndc-field-group label { display: block; font-weight: 600; color: #4a5568; font-size: 13px; margin-bottom: 4px; }
+            .vndc-field-group input[type="text"], .vndc-field-group textarea { width: 100%; border: 1px solid #cbd5e0; border-radius: 4px; padding: 8px; font-size: 13px; }
+            
+            /* Buttons */
+            .button.vndc-btn-save { background: #4facfe; border-color: #4facfe; color: #fff; font-weight: 600; padding: 6px 20px; height: auto; border-radius: 4px; transition: background 0.2s; text-shadow: none; box-shadow: none; }
+            .button.vndc-btn-save:hover { background: #00f2fe; border-color: #00f2fe; color: #fff; }
+            .button.vndc-btn-purge { background: #e71d36; border-color: #e71d36; color: #fff; text-shadow: none; border-radius: 4px; }
+            .button.vndc-btn-purge:hover { background: #ff4d6d; border-color: #ff4d6d; color: #fff; }
+            
+            /* Table stats */
+            .vndc-stats-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+            .vndc-stats-table td { padding: 10px 0; border-bottom: 1px solid #eee; font-size: 13px; }
+            .vndc-stats-table td:last-child { text-align: right; font-weight: 600; color: #2d3748; }
+            .vndc-stats-table tr:last-child td { border-bottom: none; }
+        </style>
+
+        <div class="vndc-header">
+            <div>
+                <h1>VNDC Optima <span class="vndc-brand">Control Panel</span></h1>
+                <p>Manage performance acceleration, consolidated features, and lightweight SEO tools.</p>
+            </div>
+            <div>
+                <span style="background: rgba(255,255,255,0.1); padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">v1.0.0</span>
+            </div>
+        </div>
+
+        <div class="vndc-layout">
+            <div class="vndc-col-main">
+                <form method="post" action="">
+                    <?php wp_nonce_field( 'vndc_optima_settings_save', 'vndc_optima_settings_nonce' ); ?>
+                    
+                    <div class="vndc-card">
+                        <h2>🔄 Feature Consolidation</h2>
+                        
+                        <!-- Classic Editor Toggle -->
+                        <div class="vndc-option-row">
+                            <div class="vndc-option-info">
+                                <label for="classic_editor">Classic Editor</label>
+                                <p>Replaces the default Gutenberg block editor with the classic editor. (Safe to deactivate the standalone "Classic Editor" plugin)</p>
+                            </div>
+                            <div>
+                                <label class="vndc-switch">
+                                    <input type="checkbox" name="classic_editor" id="classic_editor" value="1" <?php checked( $settings['classic_editor'], 1 ); ?> />
+                                    <span class="vndc-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Post Duplicator Toggle -->
+                        <div class="vndc-option-row">
+                            <div class="vndc-option-info">
+                                <label for="post_duplicator">Post & Page Duplicator</label>
+                                <p>Adds a "Duplicate" link to the quick actions in posts, pages, and WooCommerce products. (Safe to deactivate the standalone "Duplicate Page" plugin)</p>
+                            </div>
+                            <div>
+                                <label class="vndc-switch">
+                                    <input type="checkbox" name="post_duplicator" id="post_duplicator" value="1" <?php checked( $settings['post_duplicator'], 1 ); ?> />
+                                    <span class="vndc-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- WhatsApp Floating Button -->
+                        <div class="vndc-option-row" style="border-bottom: none;">
+                            <div class="vndc-option-info">
+                                <label for="whatsapp_button">WhatsApp Floating Button</label>
+                                <p>Injects an ultra-lightweight floating WhatsApp button in the corner of your site. (Safe to deactivate the standalone "Click to Chat" plugin)</p>
+                                
+                                <div class="vndc-sub-fields" id="wa-config-fields">
+                                    <div class="vndc-field-group">
+                                        <label for="whatsapp_number">WhatsApp Phone Number</label>
+                                        <input type="text" name="whatsapp_number" id="whatsapp_number" value="<?php echo esc_attr( $settings['whatsapp_number'] ); ?>" placeholder="e.g. 628123456789 (Use country code, no spaces)" />
+                                    </div>
+                                    <div class="vndc-field-group">
+                                        <label for="whatsapp_message">Default Chat Greeting Message</label>
+                                        <textarea name="whatsapp_message" id="whatsapp_message" rows="2" placeholder="Greeting message loaded automatically in chat..."><?php echo esc_textarea( $settings['whatsapp_message'] ); ?></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="vndc-switch">
+                                    <input type="checkbox" name="whatsapp_button" id="whatsapp_button" value="1" <?php checked( $settings['whatsapp_button'], 1 ); ?> />
+                                    <span class="vndc-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="vndc-card" style="border-top-color: #a5a2d6;">
+                        <h2>🚀 Lightweight SEO Engine</h2>
+                        
+                        <div class="vndc-option-row" style="border-bottom: none;">
+                            <div class="vndc-option-info">
+                                <label for="seo_module">Enable Core SEO Tools</label>
+                                <p>Activates XML Sitemap generation, meta title/description custom inputs, WooCommerce JSON-LD Schema, and automatic 301 redirects on slug changes. (Allows safe deactivation of "Rank Math SEO")</p>
+                                <ul style="margin: 8px 0 0 15px; padding: 0; list-style-type: disc; font-size: 12px; color: #718096;">
+                                    <li>Sitemap location: <a href="<?php echo esc_url( home_url( '/sitemap.xml' ) ); ?>" target="_blank">setiawanspooring.co.id/sitemap.xml</a></li>
+                                    <li>WooCommerce JSON-LD integration injects stars, stock, and price to Google search results automatically.</li>
+                                    <li>URL Redirect tracking prevents 404 broken links on slug changes.</li>
+                                </ul>
+                            </div>
+                            <div>
+                                <label class="vndc-switch">
+                                    <input type="checkbox" name="seo_module" id="seo_module" value="1" <?php checked( $settings['seo_module'], 1 ); ?> />
+                                    <span class="vndc-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <p style="margin-top: 20px;">
+                        <input type="submit" name="vndc_optima_save_settings" class="button vndc-btn-save" value="Save Settings" />
+                    </p>
+                </form>
+            </div>
+            
+            <div class="vndc-col-sidebar">
+                <div class="vndc-card sidebar-card">
+                    <h2>📊 System Status</h2>
+                    <table class="vndc-stats-table">
+                        <tr>
+                            <td>GD Library</td>
+                            <td><?php echo $gd_status; ?></td>
+                        </tr>
+                        <tr>
+                            <td>ImageMagick</td>
+                            <td><?php echo $imagick_status; ?></td>
+                        </tr>
+                        <tr>
+                            <td>Cached WebP Images</td>
+                            <td><?php echo (int) $cached_webp_count; ?> items</td>
+                        </tr>
+                        <tr>
+                            <td>HTML Output Cache</td>
+                            <td><span style="color: #2ec4b6; font-weight: bold;">Active</span></td>
+                        </tr>
+                        <tr>
+                            <td>LCP Preloader Cache</td>
+                            <td><span style="color: #2ec4b6; font-weight: bold;">Active</span></td>
+                        </tr>
+                    </table>
+                    
+                    <form method="post" action="" style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 15px; text-align: center;">
+                        <?php wp_nonce_field( 'vndc_optima_cache_purge', 'vndc_optima_purge_nonce' ); ?>
+                        <p style="font-size: 11px; color: #718096; text-align: left; margin-bottom: 10px;">Purging cache drops all image converter locks and transient caches to force a fresh scan of LCP and other assets.</p>
+                        <input type="submit" name="vndc_optima_purge_cache" class="button vndc-btn-purge" value="Purge Cache & Re-Scan" />
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+}
+
+/* ==========================================================================
+   10. CONSOLIDATED FEATURES LOGIC
+   ========================================================================== */
+
+add_action( 'init', 'vndc_optima_init_consolidated_features' );
+function vndc_optima_init_consolidated_features() {
+    $settings = vndc_optima_get_settings();
+    
+    // 1. Classic Editor
+    if ( ! empty( $settings['classic_editor'] ) ) {
+        add_filter( 'use_block_editor_for_post', '__return_false', 10 );
+        add_filter( 'use_block_editor_for_post_type', '__return_false', 10 );
+        add_action( 'wp_enqueue_scripts', 'vndc_optima_disable_gutenberg_styles', 9999 );
+    }
+    
+    // 2. Post Duplicator
+    if ( ! empty( $settings['post_duplicator'] ) ) {
+        add_filter( 'post_row_actions', 'vndc_optima_duplicate_post_link', 10, 2 );
+        add_filter( 'page_row_actions', 'vndc_optima_duplicate_post_link', 10, 2 );
+    }
+}
+
+function vndc_optima_disable_gutenberg_styles() {
+    wp_dequeue_style( 'wp-block-library' );
+    wp_dequeue_style( 'wp-block-library-theme' );
+    wp_dequeue_style( 'wc-blocks-style' );
+}
+
+// Post Duplicator Link & Handler
+function vndc_optima_duplicate_post_link( $actions, $post ) {
+    if ( current_user_can( 'edit_posts' ) ) {
+        $actions['duplicate'] = '<a href="' . wp_nonce_url( admin_url( 'admin-post.php?action=vndc_duplicate_post_as_draft&post=' . $post->ID ), 'vndc_duplicate_post_' . $post->ID ) . '" title="Duplicate this item" rel="permalink">Duplicate</a>';
+    }
+    return $actions;
+}
+
+add_action( 'admin_post_vndc_duplicate_post_as_draft', 'vndc_optima_duplicate_post_as_draft' );
+function vndc_optima_duplicate_post_as_draft() {
+    if ( empty( $_GET['post'] ) ) {
+        wp_die( 'No post to duplicate has been supplied!' );
+    }
+    $post_id = (int) $_GET['post'];
+    check_admin_referer( 'vndc_duplicate_post_' . $post_id );
+
+    $post = get_post( $post_id );
+    if ( ! $post ) {
+        wp_die( 'Post creation failed, could not find original post: ' . $post_id );
+    }
+
+    $current_user = wp_get_current_user();
+    $new_post_author = $current_user->ID;
+
+    $args = array(
+        'post_author'    => $new_post_author,
+        'post_content'   => $post->post_content,
+        'post_title'     => $post->post_title . ' (Copy)',
+        'post_excerpt'   => $post->post_excerpt,
+        'post_status'    => 'draft',
+        'post_pingpass'  => $post->post_pingpass,
+        'post_parent'    => $post->post_parent,
+        'post_password'  => $post->post_password,
+        'post_type'      => $post->post_type,
+        'to_ping'        => $post->to_ping,
+        'pinged'         => $post->pinged,
+        'post_content_filtered' => $post->post_content_filtered,
+    );
+
+    $new_post_id = wp_insert_post( $args );
+
+    // Copy taxonomies
+    $taxonomies = get_object_taxonomies( $post->post_type );
+    foreach ( $taxonomies as $taxonomy ) {
+        $post_terms = wp_get_object_terms( $post_id, $taxonomy, array( 'fields' => 'slugs' ) );
+        wp_set_object_terms( $new_post_id, $post_terms, $taxonomy );
+    }
+
+    // Copy post meta
+    $post_meta_infos = get_post_meta( $post_id );
+    if ( ! empty( $post_meta_infos ) ) {
+        foreach ( $post_meta_infos as $meta_key => $meta_values ) {
+            foreach ( $meta_values as $meta_value ) {
+                $meta_value = maybe_unserialize( $meta_value );
+                add_post_meta( $new_post_id, $meta_key, $meta_value );
+            }
+        }
+    }
+
+    wp_safe_redirect( admin_url( 'edit.php?post_type=' . $post->post_type ) );
+    exit;
+}
+
+// WhatsApp Floating Button Footer Injector
+add_action( 'wp_footer', 'vndc_optima_whatsapp_button_html' );
+function vndc_optima_whatsapp_button_html() {
+    $settings = vndc_optima_get_settings();
+    
+    if ( empty( $settings['whatsapp_button'] ) || empty( $settings['whatsapp_number'] ) ) {
+        return;
+    }
+    
+    $number = sanitize_text_field( $settings['whatsapp_number'] );
+    $message = sanitize_text_field( $settings['whatsapp_message'] );
+    
+    $clean_number = preg_replace( '/[^0-9]/', '', $number );
+    if ( strpos( $clean_number, '0' ) === 0 ) {
+        $clean_number = '62' . substr( $clean_number, 1 );
+    }
+    
+    $wa_url = 'https://wa.me/' . $clean_number;
+    if ( ! empty( $message ) ) {
+        $wa_url .= '?text=' . urlencode( $message );
+    }
+    
+    ?>
+    <!-- VNDC WhatsApp Floating Button -->
+    <a href="<?php echo esc_url( $wa_url ); ?>" class="vndc-wa-float" target="_blank" rel="noopener noreferrer" aria-label="Chat via WhatsApp">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="30" height="30" fill="#fff"><path d="M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L3 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>
+    </a>
+    <style>
+        .vndc-wa-float {
+            position: fixed;
+            width: 60px;
+            height: 60px;
+            bottom: 30px;
+            right: 30px;
+            background-color: #25d366;
+            color: #FFF;
+            border-radius: 50px;
+            text-align: center;
+            box-shadow: 0px 4px 15px rgba(0, 0, 0, 0.2);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        .vndc-wa-float:hover {
+            transform: scale(1.1);
+            background-color: #128c7e;
+            box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.3);
+        }
+        @media screen and (max-width: 767px) {
+            .vndc-wa-float {
+                width: 50px;
+                height: 50px;
+                bottom: 20px;
+                right: 20px;
+            }
+        }
+    </style>
+    <?php
+}
+
+/* ==========================================================================
+   11. LIGHTWEIGHT SEO ENGINE
+   ========================================================================== */
+
+// 1. Meta Box Registration
+add_action( 'add_meta_boxes', 'vndc_optima_seo_register_meta_box' );
+function vndc_optima_seo_register_meta_box() {
+    $settings = vndc_optima_get_settings();
+    if ( ! empty( $settings['seo_module'] ) ) {
+        $post_types = array( 'post', 'page', 'product' );
+        foreach ( $post_types as $post_type ) {
+            add_meta_box(
+                'vndc-seo-settings',
+                'VNDC SEO Settings',
+                'vndc_optima_seo_meta_box_html',
+                $post_type,
+                'normal',
+                'high'
+            );
+        }
+    }
+}
+
+function vndc_optima_seo_meta_box_html( $post ) {
+    $title = get_post_meta( $post->ID, '_vndc_seo_title', true );
+    $desc = get_post_meta( $post->ID, '_vndc_seo_desc', true );
+    wp_nonce_field( 'vndc_seo_save_meta', 'vndc_seo_meta_nonce' );
+    ?>
+    <div class="vndc-seo-meta-box-container">
+        <style>
+            .vndc-seo-meta-box-container p { margin-bottom: 15px; }
+            .vndc-seo-meta-box-container label { display: block; font-weight: 600; margin-bottom: 5px; color: #1d1b3a; }
+            .vndc-seo-meta-box-container input[type="text"],
+            .vndc-seo-meta-box-container textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 13px; }
+            .vndc-seo-meta-box-container .char-count { font-size: 11px; color: #718096; margin-top: 3px; display: block; text-align: right; }
+        </style>
+        <p>
+            <label for="vndc_seo_title">SEO Meta Title</label>
+            <input type="text" id="vndc_seo_title" name="vndc_seo_title" value="<?php echo esc_attr( $title ); ?>" placeholder="Leave blank to use default page title..." />
+            <span class="char-count"><span id="vndc_seo_title_count">0</span> characters (Recommended: 50-60)</span>
+        </p>
+        <p>
+            <label for="vndc_seo_desc">SEO Meta Description</label>
+            <textarea id="vndc_seo_desc" name="vndc_seo_desc" rows="3" placeholder="Leave blank to generate dynamic snippet from content..."><?php echo esc_textarea( $desc ); ?></textarea>
+            <span class="char-count"><span id="vndc_seo_desc_count">0</span> characters (Recommended: 120-160)</span>
+        </p>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                var titleInput = document.getElementById('vndc_seo_title');
+                var descInput = document.getElementById('vndc_seo_desc');
+                var titleCount = document.getElementById('vndc_seo_title_count');
+                var descCount = document.getElementById('vndc_seo_desc_count');
+                
+                function updateCount() {
+                    if(titleInput && titleCount) titleCount.textContent = titleInput.value.length;
+                    if(descInput && descCount) descCount.textContent = descInput.value.length;
+                }
+                
+                if(titleInput) titleInput.addEventListener('input', updateCount);
+                if(descInput) descInput.addEventListener('input', updateCount);
+                updateCount();
+            });
+        </script>
+    </div>
+    <?php
+}
+
+add_action( 'save_post', 'vndc_optima_seo_save_meta' );
+function vndc_optima_seo_save_meta( $post_id ) {
+    if ( ! isset( $_POST['vndc_seo_meta_nonce'] ) || ! wp_verify_nonce( $_POST['vndc_seo_meta_nonce'], 'vndc_seo_save_meta' ) ) {
+        return;
+    }
+    if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+        return;
+    }
+    if ( ! current_user_can( 'edit_post', $post_id ) ) {
+        return;
+    }
+    
+    if ( isset( $_POST['vndc_seo_title'] ) ) {
+        update_post_meta( $post_id, '_vndc_seo_title', sanitize_text_field( $_POST['vndc_seo_title'] ) );
+    }
+    if ( isset( $_POST['vndc_seo_desc'] ) ) {
+        update_post_meta( $post_id, '_vndc_seo_desc', sanitize_textarea_field( $_POST['vndc_seo_desc'] ) );
+    }
+}
+
+// 2. Custom Title Tag Filter
+add_filter( 'document_title_parts', 'vndc_optima_seo_custom_title', 999 );
+function vndc_optima_seo_custom_title( $title_parts ) {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return $title_parts;
+    }
+    
+    if ( is_singular() ) {
+        $custom_title = get_post_meta( get_the_ID(), '_vndc_seo_title', true );
+        if ( ! empty( $custom_title ) ) {
+            $title_parts['title'] = $custom_title;
+        }
+    }
+    return $title_parts;
+}
+
+// 3. Inject Meta Tags in Header
+add_action( 'wp_head', 'vndc_optima_seo_meta_tags', 1 );
+function vndc_optima_seo_meta_tags() {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    $desc = '';
+    $title = '';
+    $url = '';
+    $image = '';
+    
+    if ( is_singular() ) {
+        $post_id = get_the_ID();
+        $desc = get_post_meta( $post_id, '_vndc_seo_desc', true );
+        if ( empty( $desc ) ) {
+            $post = get_post( $post_id );
+            if ( ! empty( $post->post_excerpt ) ) {
+                $desc = $post->post_excerpt;
+            } else {
+                $desc = wp_strip_all_tags( strip_shortcodes( $post->post_content ) );
+                $desc = mb_strimwidth( $desc, 0, 160, '...' );
+            }
+        }
+        
+        $custom_title = get_post_meta( $post_id, '_vndc_seo_title', true );
+        $title = ! empty( $custom_title ) ? $custom_title : get_the_title();
+        $url = get_permalink();
+        $image_id = get_post_thumbnail_id( $post_id );
+        if ( $image_id ) {
+            $image = wp_get_attachment_image_url( $image_id, 'large' );
+        }
+    } elseif ( is_front_page() || is_home() ) {
+        $title = get_bloginfo( 'name' ) . ' - ' . get_bloginfo( 'description' );
+        $desc = get_bloginfo( 'description' );
+        $url = home_url( '/' );
+    }
+    
+    $desc = sanitize_text_field( $desc );
+    $desc = str_replace( array( "\r", "\n", '"' ), '', $desc );
+    
+    if ( ! empty( $desc ) ) {
+        echo '<meta name="description" content="' . esc_attr( $desc ) . '" />' . "\n";
+    }
+    
+    // Inject Open Graph tags for social/WhatsApp
+    if ( is_singular() ) {
+        echo '<meta property="og:locale" content="' . esc_attr( get_locale() ) . '" />' . "\n";
+        echo '<meta property="og:type" content="article" />' . "\n";
+        echo '<meta property="og:title" content="' . esc_attr( $title ) . '" />' . "\n";
+        if ( ! empty( $desc ) ) {
+            echo '<meta property="og:description" content="' . esc_attr( $desc ) . '" />' . "\n";
+        }
+        echo '<meta property="og:url" content="' . esc_url( $url ) . '" />' . "\n";
+        echo '<meta property="og:site_name" content="' . esc_attr( get_bloginfo( 'name' ) ) . '" />' . "\n";
+        if ( ! empty( $image ) ) {
+            echo '<meta property="og:image" content="' . esc_url( $image ) . '" />' . "\n";
+            echo '<meta property="og:image:secure_url" content="' . esc_url( $image ) . '" />' . "\n";
+        }
+    }
+}
+
+// 4. WooCommerce Structured Data (JSON-LD Product Schema)
+add_action( 'wp_head', 'vndc_optima_seo_woocommerce_schema', 10 );
+function vndc_optima_seo_woocommerce_schema() {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    if ( ! is_product() || ! class_exists( 'WooCommerce' ) ) {
+        return;
+    }
+    
+    global $post;
+    $product = wc_get_product( $post->ID );
+    if ( ! $product ) {
+        return;
+    }
+    
+    $currency = get_woocommerce_currency();
+    $price = $product->get_price();
+    $availability = $product->is_in_stock() ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock';
+    
+    $schema = array(
+        '@context' => 'https://schema.org/',
+        '@type' => 'Product',
+        'name' => $product->get_name(),
+        'image' => wp_get_attachment_image_url( $product->get_image_id(), 'full' ),
+        'description' => wp_strip_all_tags( $product->get_description() ? $product->get_description() : $product->get_short_description() ),
+        'sku' => $product->get_sku(),
+        'offers' => array(
+            '@type' => 'Offer',
+            'url' => get_permalink( $product->get_id() ),
+            'priceCurrency' => $currency,
+            'price' => $price ? $price : '0',
+            'priceValidUntil' => date( 'Y-12-31', strtotime( '+1 year' ) ),
+            'availability' => $availability,
+            'itemCondition' => 'https://schema.org/NewCondition'
+        )
+    );
+    
+    $schema['brand'] = array(
+        '@type' => 'Brand',
+        'name' => get_bloginfo( 'name' )
+    );
+    
+    echo '<script type="application/ld+json">' . json_encode( $schema, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT ) . '</script>' . "\n";
+}
+
+// 5. Dynamic XML Sitemap Generator
+add_action( 'init', 'vndc_optima_sitemap_rewrite_rule' );
+function vndc_optima_sitemap_rewrite_rule() {
+    add_rewrite_rule( '^sitemap\.xml$', 'index.php?vndc_sitemap=1', 'top' );
+}
+
+add_filter( 'query_vars', 'vndc_optima_sitemap_query_vars' );
+function vndc_optima_sitemap_query_vars( $vars ) {
+    $vars[] = 'vndc_sitemap';
+    return $vars;
+}
+
+add_action( 'template_redirect', 'vndc_optima_sitemap_generator' );
+function vndc_optima_sitemap_generator() {
+    if ( get_query_var( 'vndc_sitemap' ) ) {
+        $settings = vndc_optima_get_settings();
+        if ( empty( $settings['seo_module'] ) ) {
+            return;
+        }
+        
+        header( 'Content-Type: application/xml; charset=utf-8' );
+        echo '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        echo '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+        
+        // Front page
+        echo "  <url>\n";
+        echo "    <loc>" . esc_url( home_url( '/' ) ) . "</loc>\n";
+        echo "    <changefreq>daily</changefreq>\n";
+        echo "    <priority>1.0</priority>\n";
+        echo "  </url>\n";
+        
+        // Custom query for posts, pages, and products
+        $query = new WP_Query( array(
+            'post_type' => array( 'post', 'page', 'product' ),
+            'post_status' => 'publish',
+            'posts_per_page' => -1,
+            'fields' => 'ids',
+            'no_found_rows' => true,
+        ) );
+        
+        if ( $query->have_posts() ) {
+            foreach ( $query->posts as $post_id ) {
+                if ( $post_id == get_option( 'page_on_front' ) ) {
+                    continue;
+                }
+                
+                $url = get_permalink( $post_id );
+                $post_type = get_post_type( $post_id );
+                $priority = '0.6';
+                if ( $post_type === 'product' ) {
+                    $priority = '0.8';
+                } elseif ( $post_type === 'page' ) {
+                    $priority = '0.7';
+                }
+                
+                $post_date = get_the_modified_date( 'c', $post_id );
+                
+                echo "  <url>\n";
+                echo "    <loc>" . esc_url( $url ) . "</loc>\n";
+                if ( $post_date ) {
+                    echo "    <lastmod>" . esc_html( $post_date ) . "</lastmod>\n";
+                }
+                echo "    <changefreq>weekly</changefreq>\n";
+                echo "    <priority>" . esc_html( $priority ) . "</priority>\n";
+                echo "  </url>\n";
+            }
+        }
+        
+        echo '</urlset>' . "\n";
+        exit;
+    }
+}
+
+// 6. Slug Change Detector & Auto-Redirect 301
+add_action( 'post_updated', 'vndc_optima_detect_slug_change', 10, 3 );
+function vndc_optima_detect_slug_change( $post_id, $post_after, $post_before ) {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    if ( ! in_array( $post_after->post_type, array( 'post', 'page', 'product' ) ) ) {
+        return;
+    }
+    
+    if ( $post_after->post_status !== 'publish' || $post_before->post_status !== 'publish' ) {
+        return;
+    }
+    
+    if ( $post_after->post_name !== $post_before->post_name ) {
+        $old_slugs = get_post_meta( $post_id, '_vndc_old_slugs', true );
+        if ( ! is_array( $old_slugs ) ) {
+            $old_slugs = array();
+        }
+        
+        if ( ! in_array( $post_before->post_name, $old_slugs ) ) {
+            $old_slugs[] = $post_before->post_name;
+            update_post_meta( $post_id, '_vndc_old_slugs', $old_slugs );
+        }
+    }
+}
+
+add_action( 'template_redirect', 'vndc_optima_handle_old_slug_redirect' );
+function vndc_optima_handle_old_slug_redirect() {
+    $settings = vndc_optima_get_settings();
+    if ( empty( $settings['seo_module'] ) ) {
+        return;
+    }
+    
+    if ( is_404() ) {
+        global $wpdb;
+        $request_uri = $_SERVER['REQUEST_URI'];
+        $path = wp_parse_url( $request_uri, PHP_URL_PATH );
+        if ( ! $path ) {
+            return;
+        }
+        
+        $slug = basename( $path );
+        if ( empty( $slug ) ) {
+            return;
+        }
+        
+        // Query the post meta directly
+        $results = $wpdb->get_results( $wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_vndc_old_slugs' AND meta_value LIKE %s",
+            '%' . $wpdb->esc_like( $slug ) . '%'
+        ) );
+        
+        if ( $results ) {
+            foreach ( $results as $row ) {
+                $old_slugs = get_post_meta( $row->post_id, '_vndc_old_slugs', true );
+                if ( is_array( $old_slugs ) && in_array( $slug, $old_slugs ) ) {
+                    wp_redirect( get_permalink( $row->post_id ), 301 );
+                    exit;
+                }
+            }
+        }
+    }
+}
+
