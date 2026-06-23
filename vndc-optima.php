@@ -1286,7 +1286,9 @@ function vndc_optima_duplicate_post_as_draft() {
         foreach ( $post_meta_infos as $meta_key => $meta_values ) {
             foreach ( $meta_values as $meta_value ) {
                 $meta_value = maybe_unserialize( $meta_value );
-                add_post_meta( $new_post_id, $meta_key, $meta_value );
+                // Crucial: WordPress expects meta values to be slashed before saving to DB,
+                // since get_post_meta returns them unslashed. This prevents corruption of JSON data (e.g. Elementor's _elementor_data).
+                add_post_meta( $new_post_id, $meta_key, wp_slash( $meta_value ) );
             }
         }
     }
